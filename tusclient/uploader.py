@@ -4,9 +4,10 @@ import re
 from base64 import b64encode
 import time
 
-from six import iteritems, b, wraps
+from six import iteritems, b, wraps, MAXSIZE
 from six.moves.urllib.parse import urljoin
 import requests
+import hashlib
 
 from tusclient.exceptions import TusUploadFailed, TusCommunicationError
 from tusclient.request import TusRequest
@@ -46,7 +47,7 @@ class Uploader(object):
             optional if the 'url' argument is specified.
         - chunk_size (int):
             This tells the uploader what chunk size(in bytes) should be uploaded when the
-            method `upload_chunk` is called. This defaults to 2 * 1024 * 1024 i.e 2mb if not
+            method `upload_chunk` is called. This defaults to the maximum possible integer if not
             specified.
         - metadata (dict):
             A dictionary containing the upload-metadata. This would be encoded internally
@@ -76,6 +77,9 @@ class Uploader(object):
             would be used. But you can set your own custom fingerprint module by passing it to the constructor.
         - log_func (<function>):
             A logging function to be passed diagnostic messages during file uploads
+        - checksum_algorithm_name (str):
+            Name of the checksum to use for the Upload-Checksum optional tus 
+            extension.
 
     :Constructor Args:
         - file_path (str)
@@ -90,13 +94,15 @@ class Uploader(object):
         - url_storage (Optinal [<tusclient.storage.interface.Storage>])
         - fingerprinter (Optional [<tusclient.fingerprint.interface.Fingerprint>])
         - log_func (Optional [<function>])
+        - checksum_algorithm_name (Optional[str])
     """
     DEFAULT_HEADERS = {"Tus-Resumable": "1.0.0"}
-    DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024  # 2MB
+    DEFAULT_CHUNK_SIZE = MAXSIZE
 
     def __init__(self, file_path=None, file_stream=None, url=None, client=None,
                  chunk_size=None, metadata=None, retries=0, retry_delay=30,
-                 store_url=False, url_storage=None, fingerprinter=None, log_func=None):
+                 store_url=False, url_storage=None, fingerprinter=None, log_func=None,
+                 checksum_algorithm_name=None):
         if file_path is None and file_stream is None:
             raise ValueError("Either 'file_path' or 'file_stream' cannot be None.")
 
@@ -122,6 +128,7 @@ class Uploader(object):
         self._retried = 0
         self.retry_delay = retry_delay
         self.log_func = log_func
+        self.checksum_algorithm_name = checksum_algorithm_name
 
     # it is important to have this as a @property so it gets
     # updated client headers.
@@ -142,6 +149,34 @@ class Uploader(object):
         headers = self.headers
         headers_list = ['{}: {}'.format(key, value) for key, value in iteritems(headers)]
         return headers_list
+    
+    @property
+    def checksum_algorithm(self):
+        """
+        The checksum algorithm to be used for the Upload-Checksum extension. 
+        """
+        return self.__checksum_algorithm
+
+    @property
+    def checksum_algorithm_name(self):
+        return self.__checksum_algorithm_name
+    
+    @checksum_algorithm_name.setter
+    def checksum_algorithm_name(self, name):
+        """
+        checksum_algorithm_name and checksum_algorithm coming "out of sync" is 
+        probably bad times...we try to prevent it in some ways...
+        """
+        if name is not None and name not in hashlib.algorithms_available:
+            raise ValueError("Unsupported checksum algorithm: {}".format(name))
+        
+        self.__checksum_algorithm_name = name
+        if name:
+            checksum_algorithm = getattr(hashlib, name)
+            self.__checksum_algorithm = \
+                lambda data: b64encode(checksum_algorithm(data).digest()) 
+        else:
+            self.__checksum_algorithm = None
 
     @_catch_requests_error
     def get_offset(self):
@@ -294,6 +329,10 @@ class Uploader(object):
 
     def _retry_or_cry(self, error):
         if self.retries > self._retried:
+
+            if self.log_func:
+                msg = f'Failed with error {error}, sleeping for {self.retry_delay} seconds and retry ...'
+                self.log_func(msg)
             time.sleep(self.retry_delay)
 
             self._retried += 1
