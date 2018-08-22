@@ -98,6 +98,7 @@ class Uploader(object):
     """
     DEFAULT_HEADERS = {"Tus-Resumable": "1.0.0"}
     DEFAULT_CHUNK_SIZE = MAXSIZE
+    DEFAULT_TIMEOUT = 60
 
     def __init__(self, file_path=None, file_stream=None, url=None, client=None,
                  chunk_size=None, metadata=None, retries=0, retry_delay=30,
@@ -186,7 +187,7 @@ class Uploader(object):
         This is different from the instance attribute 'offset' because this makes an
         http request to the tus server to retrieve the offset.
         """
-        resp = requests.head(self.url, headers=self.headers)
+        resp = requests.head(self.url, headers=self.headers, timeout=self.DEFAULT_TIMEOUT)
         offset = resp.headers.get('upload-offset')
         if offset is None:
             msg = 'Attempt to retrieve offset fails with status {}'.format(resp.status_code)
@@ -237,7 +238,7 @@ class Uploader(object):
         headers = self.headers
         headers['upload-length'] = str(self.file_size)
         headers['upload-metadata'] = ','.join(self.encode_metadata())
-        resp = requests.post(self.client.url, headers=headers)
+        resp = requests.post(self.client.url, headers=headers, timeout=self.DEFAULT_TIMEOUT)
         url = resp.headers.get("location")
         if url is None:
             msg = 'Attempt to retrieve create file url with status {}'.format(resp.status_code)
