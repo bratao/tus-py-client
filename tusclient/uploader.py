@@ -344,6 +344,8 @@ class Uploader(object):
                 self.offset = self.get_offset()
             except TusCommunicationError as e:
                 self._retry_or_cry(e)
+            except TimeoutError as e:
+                self._retry_or_cry(e)
             else:
                 self._do_request()
         else:
