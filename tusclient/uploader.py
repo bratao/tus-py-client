@@ -325,6 +325,9 @@ class Uploader(object):
         except TusUploadFailed as error:
             self.request.close()
             self._retry_or_cry(error)
+        except TimeoutError as error:
+            self.request.close()
+            self._retry_or_cry(error)
         finally:
             self.request.close()
 
