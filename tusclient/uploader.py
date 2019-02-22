@@ -98,12 +98,13 @@ class Uploader(object):
     """
     DEFAULT_HEADERS = {"Tus-Resumable": "1.0.0"}
     DEFAULT_CHUNK_SIZE = MAXSIZE
-    DEFAULT_TIMEOUT = 60
+    DEFAULT_TIMEOUT = 30
+    MIN_CHUNK_SIZE = 16 * 1024 # 16k is the minimal chunk size we can send
 
     def __init__(self, file_path=None, file_stream=None, url=None, client=None,
                  chunk_size=None, metadata=None, retries=0, retry_delay=30,
                  store_url=False, url_storage=None, fingerprinter=None, log_func=None,
-                 checksum_algorithm_name=None):
+                 checksum_algorithm_name=None, upload_backoff=False):
         if file_path is None and file_stream is None:
             raise ValueError("Either 'file_path' or 'file_stream' cannot be None.")
 
@@ -128,6 +129,7 @@ class Uploader(object):
         self.retries = retries
         self._retried = 0
         self.retry_delay = retry_delay
+        self.upload_backoff = upload_backoff
         self.log_func = log_func
         self.checksum_algorithm_name = checksum_algorithm_name
 
@@ -333,6 +335,11 @@ class Uploader(object):
 
     def _retry_or_cry(self, error):
         if self.retries > self._retried:
+
+            if self.upload_backoff and (self.chunk_size > self.MIN_CHUNK_SIZE):
+                self.chunk_size = self.chunk_size //2
+                if self.log_func:
+                    self.log_func(f'BACKOFF CHUNK_SIZE: now at {self.chunk_size}')
 
             if self.log_func:
                 msg = f'Failed with error {error}, sleeping for {self.retry_delay} seconds and retry ...'
